@@ -18,6 +18,7 @@ import {
   GeoProxyDailyUsage,
   RegionsResponse,
   QuotaResponse,
+  V1RunResponse,
 } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://probeops.com';
@@ -89,30 +90,36 @@ export class ProbeOpsClient {
     return response.json() as Promise<T>;
   }
 
-  // ── Tool Methods ──────────────────────────────────────────
+  // ── API v1 Generic Method ────────────────────────────────
 
-  async sslCheck(params: SslCheckRequest): Promise<SslCheckResponse> {
-    return this.request<SslCheckResponse>('POST', '/api/tools/ssl-check', params);
+  async run(tool: string, target: string, params: Record<string, unknown> = {}): Promise<V1RunResponse> {
+    return this.request<V1RunResponse>('POST', '/api/v1/run', { tool, target, params });
   }
 
-  async dnsLookup(params: DnsLookupRequest): Promise<DnsLookupResponse> {
-    return this.request<DnsLookupResponse>('POST', '/api/tools/dns-lookup', params);
+  // ── Tool Methods (thin wrappers over v1/run) ───────────
+
+  async sslCheck(params: SslCheckRequest): Promise<V1RunResponse> {
+    return this.run('ssl_check', params.domain);
   }
 
-  async isItDown(params: IsItDownRequest): Promise<IsItDownResponse> {
-    return this.request<IsItDownResponse>('POST', '/api/tools/is-it-down', params);
+  async dnsLookup(params: DnsLookupRequest): Promise<V1RunResponse> {
+    return this.run('dns_lookup', params.domain, { record_type: params.record_type || 'A' });
   }
 
-  async latencyTest(params: LatencyTestRequest): Promise<LatencyTestResponse> {
-    return this.request<LatencyTestResponse>('POST', '/api/tools/latency-test', params);
+  async isItDown(params: IsItDownRequest): Promise<V1RunResponse> {
+    return this.run('is_it_down', params.url);
   }
 
-  async traceroute(params: TracerouteRequest): Promise<TracerouteResponse> {
-    return this.request<TracerouteResponse>('POST', '/api/tools/traceroute', params);
+  async latencyTest(params: LatencyTestRequest): Promise<V1RunResponse> {
+    return this.run('latency_test', params.target);
   }
 
-  async portCheck(params: PortCheckRequest): Promise<PortCheckResponse> {
-    return this.request<PortCheckResponse>('POST', '/api/tools/port-check', params);
+  async traceroute(params: TracerouteRequest): Promise<V1RunResponse> {
+    return this.run('traceroute', params.target, { protocol: params.protocol || 'tcp' });
+  }
+
+  async portCheck(params: PortCheckRequest): Promise<V1RunResponse> {
+    return this.run('port_check', params.target, { port: params.port });
   }
 
   async getGeoProxy(params: GeoProxyRequest): Promise<GeoProxyResponse> {

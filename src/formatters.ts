@@ -12,6 +12,7 @@ import {
   RegionResult,
   ProxyRegionInfo,
   CachedQuota,
+  V1RunResponse,
 } from './types.js';
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -35,8 +36,9 @@ function lockedNote(count: number): string {
 
 // ── SSL Check ───────────────────────────────────────────────
 
-export function formatSslCheck(data: SslCheckResponse): string {
-  const lines: string[] = [`SSL Certificate Report for ${data.domain}`];
+export function formatSslCheck(data: SslCheckResponse | V1RunResponse): string {
+  const domain = (data as SslCheckResponse).domain ?? (data as V1RunResponse).domain ?? (data as V1RunResponse).target;
+  const lines: string[] = [`SSL Certificate Report for ${domain}`];
 
   if (data.certificate) {
     const cert = data.certificate;
@@ -75,8 +77,10 @@ export function formatSslCheck(data: SslCheckResponse): string {
 
 // ── DNS Lookup ──────────────────────────────────────────────
 
-export function formatDnsLookup(data: DnsLookupResponse): string {
-  const lines: string[] = [`DNS Lookup: ${data.domain} (${data.record_type})`];
+export function formatDnsLookup(data: DnsLookupResponse | V1RunResponse): string {
+  const domain = (data as DnsLookupResponse).domain ?? (data as V1RunResponse).domain ?? (data as V1RunResponse).target;
+  const recordType = (data as DnsLookupResponse).record_type ?? (data as V1RunResponse).record_type ?? 'A';
+  const lines: string[] = [`DNS Lookup: ${domain} (${recordType})`];
   lines.push('');
 
   for (const r of data.regions_checked) {
@@ -102,9 +106,11 @@ export function formatDnsLookup(data: DnsLookupResponse): string {
 
 // ── Is It Down ──────────────────────────────────────────────
 
-export function formatIsItDown(data: IsItDownResponse): string {
-  const statusEmoji = data.global_status === 'up' ? 'UP' : data.global_status === 'down' ? 'DOWN' : 'PARTIAL';
-  const lines: string[] = [`Website Status: ${data.url}`];
+export function formatIsItDown(data: IsItDownResponse | V1RunResponse): string {
+  const gs = (data as IsItDownResponse).global_status ?? (data as V1RunResponse).global_status ?? 'unknown';
+  const statusEmoji = gs === 'up' ? 'UP' : gs === 'down' ? 'DOWN' : 'PARTIAL';
+  const url = (data as IsItDownResponse).url ?? (data as V1RunResponse).url ?? (data as V1RunResponse).target;
+  const lines: string[] = [`Website Status: ${url}`];
   lines.push(`  Global Status: ${statusEmoji}`);
   lines.push('');
   lines.push('  Region Results:');
@@ -117,7 +123,7 @@ export function formatIsItDown(data: IsItDownResponse): string {
 
 // ── Latency Test ────────────────────────────────────────────
 
-export function formatLatencyTest(data: LatencyTestResponse): string {
+export function formatLatencyTest(data: LatencyTestResponse | V1RunResponse): string {
   const lines: string[] = [`Latency Test: ${data.target}`];
 
   if (data.average_latency_ms !== undefined) {
@@ -145,7 +151,7 @@ export function formatLatencyTest(data: LatencyTestResponse): string {
 
 // ── Traceroute ──────────────────────────────────────────────
 
-export function formatTraceroute(data: TracerouteResponse): string {
+export function formatTraceroute(data: TracerouteResponse | V1RunResponse): string {
   const lines: string[] = [`Traceroute: ${data.target}`];
   lines.push('');
 
@@ -172,15 +178,46 @@ export function formatTraceroute(data: TracerouteResponse): string {
 
 // ── Port Check ──────────────────────────────────────────────
 
-export function formatPortCheck(data: PortCheckResponse): string {
-  const statusLabel = data.global_status.toUpperCase();
-  const lines: string[] = [`Port Check: ${data.target}:${data.port}`];
+export function formatPortCheck(data: PortCheckResponse | V1RunResponse): string {
+  const gs = (data as PortCheckResponse).global_status ?? (data as V1RunResponse).global_status ?? 'unknown';
+  const statusLabel = gs.toUpperCase();
+  const port = (data as PortCheckResponse).port ?? (data as V1RunResponse).port ?? '';
+  const lines: string[] = [`Port Check: ${data.target}:${port}`];
   lines.push(`  Global Status: ${statusLabel}`);
   lines.push('');
   lines.push('  Region Results:');
   lines.push(regionTable(data.regions_checked));
   lines.push(lockedNote(data.regions_locked.length));
   lines.push(`\n  Completed in ${data.execution_time_ms}ms`);
+
+  return lines.join('\n');
+}
+
+// ── Generic Result (for new tools without custom formatters) ─
+
+export function formatGenericResult(data: V1RunResponse): string {
+  const lines: string[] = [`${data.tool.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}: ${data.target}`];
+  lines.push('');
+
+  for (const r of data.regions_checked) {
+    const location = r.location || r.region;
+    lines.push(`  ${r.region} (${location}):`);
+    if (r.success && r.result?.output) {
+      const output = r.result.output.trim();
+      // Truncate very long outputs
+      const truncated = output.length > 2000 ? output.slice(0, 2000) + '\n    ... [truncated]' : output;
+      for (const line of truncated.split('\n')) {
+        lines.push(`    ${line}`);
+      }
+    } else {
+      lines.push(`    Error: ${r.error || 'No response'}`);
+    }
+    lines.push(`    Response time: ${r.response_time_ms}ms`);
+    lines.push('');
+  }
+
+  lines.push(lockedNote(data.regions_locked.length));
+  lines.push(`  Completed in ${data.execution_time_ms}ms`);
 
   return lines.join('\n');
 }

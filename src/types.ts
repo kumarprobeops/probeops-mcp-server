@@ -167,6 +167,47 @@ export interface PortCheckResponse {
   checked_at: string;
 }
 
+// ── API v1 Unified Response ───────────────────────────────────
+
+export interface V1QuotaLimits {
+  minute: number;
+  hour: number;
+  day: number;
+  month: number;
+  concurrent?: number;
+}
+
+export interface V1QuotaInfo {
+  tier: string;
+  limits: V1QuotaLimits;
+  usage: V1QuotaLimits;
+  available: V1QuotaLimits;
+}
+
+export interface V1RunResponse {
+  tool: string;
+  target: string;
+  regions_checked: RegionResult[];
+  regions_locked: LockedRegion[];
+  is_authenticated: boolean;
+  execution_time_ms: number;
+  checked_at: string;
+  quota: V1QuotaInfo;
+  // Tool-specific (optional, populated by backend based on tool type)
+  domain?: string;
+  url?: string;
+  record_type?: string;
+  port?: number;
+  certificate?: CertificateInfo | null;
+  region_certificates?: Array<{ region: string; certificate: CertificateInfo | null }>;
+  certificates_consistent?: boolean;
+  inconsistency_details?: string | null;
+  global_status?: string;
+  average_latency_ms?: number;
+  min_latency_ms?: number;
+  max_latency_ms?: number;
+}
+
 // ── Geo Proxy ─────────────────────────────────────────────────
 
 export interface GeoProxyRequest {

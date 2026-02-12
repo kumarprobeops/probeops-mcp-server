@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { ProbeOpsClient } from './api-client.js';
-import { ProbeOpsError, GeoProxyResponse, ProxyRegionInfo, CachedQuota } from './types.js';
+import { ProbeOpsError, GeoProxyResponse, ProxyRegionInfo, CachedQuota, V1RunResponse } from './types.js';
 import {
   formatSslCheck,
   formatDnsLookup,
@@ -12,6 +12,7 @@ import {
   formatLatencyTest,
   formatTraceroute,
   formatPortCheck,
+  formatGenericResult,
   formatGeoProxy,
   formatRegions,
   formatProxyRegions,
@@ -182,6 +183,21 @@ function buildQuotaFooter(category: 'diagnostic' | 'proxy'): string {
   return '\n---\n' + parts.join(' | ');
 }
 
+// ── V1 Quota Update Helper ───────────────────────────────────
+
+function updateQuotaFromV1(data: V1RunResponse): void {
+  if (data.quota) {
+    quotaCache.diagnostic = {
+      can_execute: true,
+      tier: data.quota.tier,
+      limits: data.quota.limits,
+      usage: data.quota.usage,
+      remaining: data.quota.available,
+    };
+    quotaCache.fetchedAt = Date.now();
+  }
+}
+
 // ── Helper ──────────────────────────────────────────────────
 
 function errorText(err: unknown): string {
@@ -223,8 +239,8 @@ server.tool(
   { domain: z.string().describe('Domain name to check (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.sslCheck({ domain });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatSslCheck(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -241,8 +257,8 @@ server.tool(
   },
   async ({ domain, record_type }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain, record_type });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -256,8 +272,8 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain, record_type: 'MX' });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -271,8 +287,8 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain, record_type: 'TXT' });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -286,8 +302,8 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain, record_type: 'NS' });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -301,8 +317,8 @@ server.tool(
   { domain: z.string().describe('Domain or subdomain to look up (e.g., "www.example.com")') },
   async ({ domain }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain, record_type: 'CNAME' });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -316,8 +332,8 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain, record_type: 'CAA' });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -331,8 +347,8 @@ server.tool(
   { ip: z.string().describe('IP address to look up (e.g., "8.8.8.8")') },
   async ({ ip }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.dnsLookup({ domain: ip, record_type: 'PTR' });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -346,8 +362,8 @@ server.tool(
   { url: z.string().describe('Full URL to check (e.g., "https://example.com")') },
   async ({ url }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.isItDown({ url });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatIsItDown(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -361,8 +377,8 @@ server.tool(
   { target: z.string().describe('Hostname or IP to test (e.g., "example.com" or "8.8.8.8")') },
   async ({ target }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.latencyTest({ target });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatLatencyTest(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -379,8 +395,8 @@ server.tool(
   },
   async ({ target, protocol }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.traceroute({ target, protocol });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatTraceroute(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
@@ -397,14 +413,152 @@ server.tool(
   },
   async ({ target, port }) => {
     try {
-      refreshQuotaCache().catch(() => {});
       const data = await client.portCheck({ target, port });
+      updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatPortCheck(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
     }
   }
 );
+
+// ── New Tools (via v1/run) ───────────────────────────────────
+
+server.tool(
+  'ping',
+  'ICMP ping a target from multiple global regions. Returns packet loss and round-trip times. Useful for basic reachability and latency testing.',
+  { target: z.string().describe('Hostname or IP to ping (e.g., "example.com" or "8.8.8.8")') },
+  async ({ target }) => {
+    try {
+      const data = await client.run('ping', target);
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'whois',
+  'Look up WHOIS registration information for a domain. Shows registrar, creation/expiry dates, nameservers, and registrant info.',
+  { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
+  async ({ domain }) => {
+    try {
+      const data = await client.run('whois', domain);
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'nmap_port_check',
+  'Check if multiple ports are open or closed on a target from multiple global regions using nmap. Checks specified ports (not a full scan).',
+  {
+    target: z.string().describe('Hostname or IP to check (e.g., "example.com")'),
+    ports: z.string().optional().describe('Ports to check (e.g., "80,443" or "22,80,443,8080"). Default: common ports 1-1024'),
+  },
+  async ({ target, ports }) => {
+    try {
+      const params: Record<string, unknown> = {};
+      if (ports) params.ports = ports;
+      const data = await client.run('nmap', target, params);
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'tcp_ping',
+  'Measure TCP-level latency to a specific port on a target from multiple global regions. More reliable than ICMP ping for hosts that block ICMP.',
+  {
+    target: z.string().describe('Hostname or IP to test (e.g., "example.com")'),
+    port: z.number().int().min(1).max(65535).describe('Port number to TCP ping (e.g., 443)'),
+  },
+  async ({ target, port }) => {
+    try {
+      const data = await client.run('tcping', target, { port });
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'keyword_check',
+  'Check if a keyword or phrase exists on a web page from multiple global regions. Useful for verifying content delivery and geo-specific content.',
+  {
+    url: z.string().describe('URL to check (e.g., "https://example.com")'),
+    keyword: z.string().describe('Keyword or phrase to search for on the page'),
+  },
+  async ({ url, keyword }) => {
+    try {
+      const data = await client.run('keyword_check', url, { keyword });
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'websocket_check',
+  'Check WebSocket endpoint health and connectivity from multiple global regions. Verifies that a WebSocket server is accepting connections.',
+  { url: z.string().describe('WebSocket URL to check (e.g., "wss://example.com/ws")') },
+  async ({ url }) => {
+    try {
+      const data = await client.run('websocket_check', url);
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'banner_grab',
+  'Grab the service banner from a specific port on a target from multiple global regions. Identifies service type and version.',
+  {
+    target: z.string().describe('Hostname or IP to check (e.g., "example.com")'),
+    port: z.number().int().min(1).max(65535).describe('Port number to grab banner from (e.g., 22, 80, 443)'),
+  },
+  async ({ target, port }) => {
+    try {
+      const data = await client.run('banner_grab', target, { port });
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'api_health',
+  'Check API endpoint health from multiple global regions. Sends an HTTP request and reports status code, response time, and availability.',
+  { url: z.string().describe('API URL to check (e.g., "https://api.example.com/health")') },
+  async ({ url }) => {
+    try {
+      const data = await client.run('api_health', url);
+      updateQuotaFromV1(data);
+      return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: errorText(err) }], isError: true };
+    }
+  }
+);
+
+// ── Proxy Tools ─────────────────────────────────────────────
 
 server.tool(
   'get_geo_proxy',
