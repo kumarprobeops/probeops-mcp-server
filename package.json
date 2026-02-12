@@ -1,0 +1,91 @@
+{
+  "name": "@probeops/mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for infrastructure diagnostics and geo-proxy browsing. SSL checks, DNS lookups, uptime monitoring, latency tests, traceroute, port scans, and geo-located web browsing from 6 global regions. Works with Claude Code, Cursor, Windsurf, and any MCP client.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "probeops-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "probeops",
+    "devops",
+    "infrastructure",
+    "monitoring",
+    "ssl",
+    "ssl-checker",
+    "ssl-certificate",
+    "tls",
+    "dns",
+    "dns-lookup",
+    "dns-propagation",
+    "mx-lookup",
+    "spf-check",
+    "dkim",
+    "dmarc",
+    "uptime",
+    "uptime-monitoring",
+    "is-it-down",
+    "website-monitoring",
+    "latency",
+    "ping",
+    "network-diagnostics",
+    "traceroute",
+    "port-checker",
+    "port-scanner",
+    "geo-proxy",
+    "geo-browsing",
+    "web-scraping",
+    "proxy",
+    "playwright",
+    "screenshot",
+    "multi-region",
+    "global-monitoring",
+    "site-reliability",
+    "sre",
+    "claude-code",
+    "cursor",
+    "windsurf",
+    "ai-tools",
+    "ai-agent"
+  ],
+  "author": "ProbeOps <support@probeops.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kumarprobeops/probeops-mcp-server.git"
+  },
+  "homepage": "https://probeops.com",
+  "bugs": {
+    "url": "https://github.com/kumarprobeops/probeops-mcp-server/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "https-proxy-agent": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "playwright-core": "^1.58.2",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "playwright-core": ">=1.40.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright-core": {
+      "optional": true
+    }
+  }
+}

@@ -1,0 +1,8 @@
+src/
+tsconfig.json
+test-*.mjs
+.git/
+.github/
+*.tgz
+.env
+.DS_Store
