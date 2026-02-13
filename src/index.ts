@@ -494,7 +494,7 @@ server.tool(
 
 server.tool(
   'keyword_check',
-  'Check if a keyword or phrase exists on a web page from multiple global regions. Useful for verifying content delivery and geo-specific content.',
+  'Check if a keyword exists in a web page\'s raw HTML source from multiple global regions. Searches raw HTML — does not execute JavaScript, so content rendered client-side (SPAs, dynamic widgets) may not be detected. Useful for verifying static content delivery and geo-specific content.',
   {
     url: z.string().describe('URL to check (e.g., "https://example.com")'),
     keyword: z.string().describe('Keyword or phrase to search for on the page'),
@@ -591,7 +591,18 @@ server.tool(
     refreshQuotaCache().catch(() => {});
     const captureAction = action || 'both';
 
-    // Step 1: Get proxy credentials (reuses cached token if valid)
+    // Step 1: Detect if Playwright is available BEFORE acquiring a token
+    let hasPlaywright = false;
+    try {
+      const pw = await import('playwright-core');
+      const fs = await import('fs');
+      const execPath = pw.chromium.executablePath();
+      hasPlaywright = !!execPath && fs.existsSync(execPath);
+    } catch {
+      hasPlaywright = false;
+    }
+
+    // Step 2: Get proxy credentials (reuses cached token if valid)
     let proxyData;
     try {
       proxyData = await getOrCreateProxyToken(region);
@@ -599,55 +610,36 @@ server.tool(
       return { content: [{ type: 'text', text: errorText(err) }], isError: true };
     }
 
-    // Step 2: Get proxy server URL from API response (not hardcoded)
     const proxyServer = getProxyServer(proxyData, region);
 
-    // Step 3: Try Playwright (full browser rendering)
-    try {
-      const { chromium } = await import('playwright-core');
-      const browser = await chromium.launch({ headless: true });
+    // Step 3a: Playwright path (full browser rendering)
+    if (hasPlaywright) {
       try {
-        const context = await browser.newContext({
-          proxy: {
-            server: proxyServer,
-            username: proxyData.jwt_token,
-            password: '',
-          },
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-          viewport: { width: 1280, height: 720 },
-        });
-
-        const page = await context.newPage();
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-
-        const title = await page.title();
-        const finalUrl = page.url();
-
-        const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [];
-
-        // Capture text content
-        if (captureAction === 'content' || captureAction === 'both') {
-          const text = await page.evaluate('document.body.innerText') as string;
-          const truncated = text.length > 5000 ? text.slice(0, 5000) + '\n\n... [truncated, full page is ' + text.length + ' chars]' : text;
-          content.push({
-            type: 'text',
-            text: [
-              `Geo-Browse: ${url} from ${region}`,
-              `Proxy: ${proxyServer}`,
-              `Final URL: ${finalUrl}`,
-              `Title: ${title}`,
-              `Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
-              '',
-              'Page Content:',
-              truncated,
-            ].join('\n'),
+        const { chromium } = await import('playwright-core');
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const context = await browser.newContext({
+            proxy: {
+              server: proxyServer,
+              username: proxyData.jwt_token,
+              password: '',
+            },
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            viewport: { width: 1280, height: 720 },
           });
-        }
 
-        // Capture screenshot
-        if (captureAction === 'screenshot' || captureAction === 'both') {
-          const screenshot = await page.screenshot({ type: 'png', fullPage: false });
-          if (captureAction === 'screenshot') {
+          const page = await context.newPage();
+          await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+
+          const title = await page.title();
+          const finalUrl = page.url();
+
+          const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [];
+
+          // Capture text content
+          if (captureAction === 'content' || captureAction === 'both') {
+            const text = await page.evaluate('document.body.innerText') as string;
+            const truncated = text.length > 5000 ? text.slice(0, 5000) + '\n\n... [truncated, full page is ' + text.length + ' chars]' : text;
             content.push({
               type: 'text',
               text: [
@@ -656,90 +648,121 @@ server.tool(
                 `Final URL: ${finalUrl}`,
                 `Title: ${title}`,
                 `Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
+                '',
+                'Page Content:',
+                truncated,
               ].join('\n'),
             });
           }
-          content.push({
-            type: 'image',
-            data: screenshot.toString('base64'),
-            mimeType: 'image/png',
-          });
-        }
 
-        await context.close();
-        // Append proxy quota footer to the first text content block
-        const footer = buildQuotaFooter('proxy');
-        if (footer) {
-          const firstText = content.find((c): c is { type: 'text'; text: string } => c.type === 'text');
-          if (firstText) firstText.text += footer;
+          // Capture screenshot
+          if (captureAction === 'screenshot' || captureAction === 'both') {
+            const screenshot = await page.screenshot({ type: 'png', fullPage: false });
+            if (captureAction === 'screenshot') {
+              content.push({
+                type: 'text',
+                text: [
+                  `Geo-Browse: ${url} from ${region}`,
+                  `Proxy: ${proxyServer}`,
+                  `Final URL: ${finalUrl}`,
+                  `Title: ${title}`,
+                  `Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
+                ].join('\n'),
+              });
+            }
+            content.push({
+              type: 'image',
+              data: screenshot.toString('base64'),
+              mimeType: 'image/png',
+            });
+          }
+
+          await context.close();
+          const footer = buildQuotaFooter('proxy');
+          if (footer) {
+            const firstText = content.find((c): c is { type: 'text'; text: string } => c.type === 'text');
+            if (firstText) firstText.text += footer;
+          }
+          return { content };
+        } finally {
+          await browser.close();
         }
-        return { content };
-      } finally {
-        await browser.close();
+      } catch (playwrightError) {
+        // Playwright detected but failed to launch — fall through to HTTP fallback
+        process.stderr.write(`[probeops] Playwright launch failed, falling back to HTTP: ${playwrightError instanceof Error ? playwrightError.message : playwrightError}\n`);
       }
-    } catch (playwrightError) {
-      // Step 4: Fallback — HTTP fetch through proxy (no browser needed)
-      try {
-        const { HttpsProxyAgent } = await import('https-proxy-agent');
-        // Embed JWT as username in proxy URL for Basic auth (matches Rust proxy expectations)
-        const proxyUrl = new URL(proxyServer);
-        proxyUrl.username = proxyData.jwt_token;
-        proxyUrl.password = '';
-        const agent = new HttpsProxyAgent(proxyUrl.toString());
+    }
 
-        const response = await fetch(url, {
+    // Step 3b: HTTP fallback (uses node:https with HttpsProxyAgent)
+    try {
+      const { HttpsProxyAgent } = await import('https-proxy-agent');
+      const https = await import('node:https');
+      const http = await import('node:http');
+
+      const proxyUrl = new URL(proxyServer);
+      proxyUrl.username = proxyData.jwt_token;
+      proxyUrl.password = '';
+      const agent = new HttpsProxyAgent(proxyUrl.toString());
+
+      const body = await new Promise<string>((resolve, reject) => {
+        const parsedUrl = new URL(url);
+        const mod = parsedUrl.protocol === 'https:' ? https : http;
+        const req = mod.request(url, {
+          agent,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           },
-          // @ts-expect-error Node.js fetch supports agent via dispatcher
-          dispatcher: agent,
-          signal: AbortSignal.timeout(30000),
+          timeout: 30000,
+        }, (res) => {
+          let data = '';
+          res.on('data', (chunk: Buffer) => data += chunk.toString());
+          res.on('end', () => resolve(data));
+          res.on('error', reject);
         });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+        req.end();
+      });
 
-        const html = await response.text();
-        const truncatedHtml = html.length > 5000 ? html.slice(0, 5000) + '\n\n... [truncated]' : html;
+      const truncatedHtml = body.length > 5000 ? body.slice(0, 5000) + '\n\n... [truncated]' : body;
 
-        return {
-          content: [{
-            type: 'text',
-            text: [
-              `Geo-Browse (HTTP fallback): ${url} from ${region}`,
-              `Status: ${response.status} ${response.statusText}`,
-              `Content-Type: ${response.headers.get('content-type') || 'unknown'}`,
-              `Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
-              '',
-              'Note: Full browser rendering requires Chromium. Install with: npx playwright install chromium',
-              '',
-              'Raw HTML:',
-              truncatedHtml,
-            ].join('\n') + buildQuotaFooter('proxy'),
-          }],
-        };
-      } catch (fetchError) {
-        // Both Playwright and HTTP fetch failed — return helpful error
-        const pwErr = playwrightError instanceof Error ? playwrightError.message : String(playwrightError);
-        return {
-          content: [{
-            type: 'text',
-            text: [
-              `Geo-Browse failed for ${url} from ${region}`,
-              '',
-              `Playwright error: ${pwErr}`,
-              '',
-              'To use full browser rendering, install Chromium:',
-              '  npx playwright install chromium',
-              '',
-              'Proxy credentials were obtained successfully:',
-              `  Token: ${proxyData.token_id}`,
-              `  Region: ${region}`,
-              `  Proxy: ${proxyServer}`,
-              `  Expires: ${proxyData.expires_at}`,
-              `  Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
-            ].join('\n'),
-          }],
-          isError: true,
-        };
-      }
+      return {
+        content: [{
+          type: 'text',
+          text: [
+            `Geo-Browse (HTTP fallback): ${url} from ${region}`,
+            `Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
+            '',
+            hasPlaywright ? '' : 'Note: Full browser rendering requires Chromium. Install with: npx playwright install chromium\n',
+            'Raw HTML:',
+            truncatedHtml,
+          ].filter(Boolean).join('\n') + buildQuotaFooter('proxy'),
+        }],
+      };
+    } catch (fetchError) {
+      const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      return {
+        content: [{
+          type: 'text',
+          text: [
+            `Geo-Browse failed for ${url} from ${region}`,
+            '',
+            `Error: ${errMsg}`,
+            '',
+            'To use full browser rendering, install Chromium:',
+            '  npx playwright install chromium',
+            '',
+            'Proxy credentials were obtained successfully:',
+            `  Token: ${proxyData.token_id}`,
+            `  Region: ${region}`,
+            `  Proxy: ${proxyServer}`,
+            `  Expires: ${proxyData.expires_at}`,
+            `  Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
+          ].join('\n'),
+        }],
+        isError: true,
+      };
     }
   }
 );
