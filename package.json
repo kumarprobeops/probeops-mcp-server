@@ -1,6 +1,6 @@
 {
   "name": "@probeops/mcp-server",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "MCP server for multi-region infrastructure diagnostics — SSL, DNS, ping, whois, traceroute, port check, latency, and geo-proxy browsing from 6 global regions",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -71,17 +71,11 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "https-proxy-agent": "^7.0.0"
   },
+  "optionalDependencies": {
+    "playwright-core": "^1.58.0"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "playwright-core": "^1.58.2",
     "typescript": "^5.7.0"
-  },
-  "peerDependencies": {
-    "playwright-core": ">=1.40.0"
-  },
-  "peerDependenciesMeta": {
-    "playwright-core": {
-      "optional": true
-    }
   }
 }

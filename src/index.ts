@@ -29,6 +29,16 @@ import {
 const API_KEY = process.env.PROBEOPS_API_KEY;
 const BASE_URL = process.env.PROBEOPS_BASE_URL || 'https://probeops.com';
 
+// Region geo-emulation settings (sourced from ProbeOps Horizon)
+const REGION_CONFIG: Record<string, { timezone: string; locale: string; lat: number; lng: number; location: string }> = {
+  'eu-central': { timezone: 'Europe/Helsinki', locale: 'en-FI', lat: 60.17, lng: 24.94, location: 'Helsinki, Finland' },
+  'us-east':    { timezone: 'America/New_York', locale: 'en-US', lat: 39.04, lng: -77.49, location: 'Ashburn, Virginia' },
+  'ap-south':   { timezone: 'Asia/Kolkata', locale: 'en-IN', lat: 19.08, lng: 72.88, location: 'Mumbai, India' },
+  'us-west':    { timezone: 'America/Los_Angeles', locale: 'en-US', lat: 45.59, lng: -121.18, location: 'Boardman, Oregon' },
+  'ca-central': { timezone: 'America/Toronto', locale: 'en-CA', lat: 45.50, lng: -73.57, location: 'Montreal, Canada' },
+  'ap-southeast': { timezone: 'Australia/Sydney', locale: 'en-AU', lat: -33.87, lng: 151.21, location: 'Sydney, Australia' },
+};
+
 if (!API_KEY) {
   console.error('Error: PROBEOPS_API_KEY environment variable is required.');
   console.error('Get your free API key at https://probeops.com/dashboard/api-keys');
@@ -622,6 +632,7 @@ server.tool(
         const { chromium } = await import('playwright-core');
         const browser = await chromium.launch({ headless: true });
         try {
+          const regionCfg = REGION_CONFIG[region];
           const context = await browser.newContext({
             proxy: {
               server: proxyServer,
@@ -630,6 +641,12 @@ server.tool(
             },
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             viewport: { width: 1280, height: 720 },
+            ...(regionCfg && {
+              timezoneId: regionCfg.timezone,
+              locale: regionCfg.locale,
+              geolocation: { latitude: regionCfg.lat, longitude: regionCfg.lng },
+              permissions: ['geolocation'],
+            }),
           });
 
           const page = await context.newPage();
@@ -751,14 +768,17 @@ server.tool(
 
       const truncatedHtml = body.length > 5000 ? body.slice(0, 5000) + '\n\n... [truncated]' : body;
 
+      const regionCfg = REGION_CONFIG[region];
       return {
         content: [{
           type: 'text',
           text: [
             `Geo-Browse (HTTP fallback): ${url} from ${region}`,
+            regionCfg ? `Region: ${regionCfg.location} | Timezone: ${regionCfg.timezone} | Locale: ${regionCfg.locale}` : '',
+            `Proxy: ${proxyServer}`,
             `Quota: ${proxyData.daily_usage.consumed}/${proxyData.daily_usage.quota} tokens used today`,
             '',
-            hasPlaywright ? '' : 'Note: Full browser rendering requires Chromium. Install with: npx playwright install chromium\n',
+            hasPlaywright ? '' : 'Note: For full browser rendering with screenshots, install Chromium:\n  npx playwright-core install chromium\n',
             'Raw HTML:',
             truncatedHtml,
           ].filter(Boolean).join('\n') + buildQuotaFooter('proxy'),
@@ -775,7 +795,7 @@ server.tool(
             `Error: ${errMsg}`,
             '',
             'To use full browser rendering, install Chromium:',
-            '  npx playwright install chromium',
+            '  npx playwright-core install chromium',
             '',
             'Proxy credentials were obtained successfully:',
             `  Token: ${proxyData.token_id}`,
