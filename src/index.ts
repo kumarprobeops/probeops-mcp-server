@@ -72,8 +72,22 @@ function buildExtensionNotice(data: GeoProxyResponse): string {
  * 3. Expired/no cache → generate new token (1 quota unit)
  *
  * A single token works across ALL regions (allowed_regions: ["*"]).
+ * Uses a mutex to prevent parallel calls from generating duplicate tokens.
  */
-async function getOrCreateProxyToken(region: string): Promise<GeoProxyResponse> {
+let tokenMutex: Promise<GeoProxyResponse> | null = null;
+
+function getOrCreateProxyToken(region: string): Promise<GeoProxyResponse> {
+  // If a token operation is already in flight, wait for it
+  if (tokenMutex) {
+    return tokenMutex.then(() => getOrCreateProxyTokenImpl(region));
+  }
+  const promise = getOrCreateProxyTokenImpl(region);
+  tokenMutex = promise;
+  promise.finally(() => { tokenMutex = null; });
+  return promise;
+}
+
+async function getOrCreateProxyTokenImpl(region: string): Promise<GeoProxyResponse> {
   const now = Date.now();
 
   if (cachedProxyToken) {
