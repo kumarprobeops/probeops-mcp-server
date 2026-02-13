@@ -3,8 +3,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ProbeOpsClient } from './api-client.js';
 import { ProbeOpsError, GeoProxyResponse, ProxyRegionInfo, CachedQuota, V1RunResponse } from './types.js';
+
+const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')).version as string;
 import {
   formatSslCheck,
   formatDnsLookup,
@@ -228,7 +232,7 @@ function errorText(err: unknown): string {
 
 const server = new McpServer({
   name: 'probeops',
-  version: '1.0.0',
+  version: PKG_VERSION,
 });
 
 // ── Tools ───────────────────────────────────────────────────
