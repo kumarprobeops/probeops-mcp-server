@@ -704,25 +704,45 @@ server.tool(
       proxyUrl.password = '';
       const agent = new HttpsProxyAgent(proxyUrl.toString());
 
+      const MAX_REDIRECTS = 5;
       const body = await new Promise<string>((resolve, reject) => {
-        const parsedUrl = new URL(url);
-        const mod = parsedUrl.protocol === 'https:' ? https : http;
-        const req = mod.request(url, {
-          agent,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          timeout: 30000,
-        }, (res) => {
-          let data = '';
-          res.on('data', (chunk: Buffer) => data += chunk.toString());
-          res.on('end', () => resolve(data));
-          res.on('error', reject);
-        });
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
-        req.end();
+        let redirectCount = 0;
+
+        function doRequest(requestUrl: string) {
+          const parsedUrl = new URL(requestUrl);
+          const mod = parsedUrl.protocol === 'https:' ? https : http;
+          const req = mod.request(requestUrl, {
+            agent,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            timeout: 30000,
+          }, (res) => {
+            // Follow 3xx redirects
+            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              redirectCount++;
+              if (redirectCount > MAX_REDIRECTS) {
+                reject(new Error(`Too many redirects (>${MAX_REDIRECTS})`));
+                return;
+              }
+              const redirectUrl = new URL(res.headers.location, requestUrl).toString();
+              process.stderr.write(`[probeops] Following redirect ${res.statusCode} → ${redirectUrl}\n`);
+              res.resume(); // drain the response
+              doRequest(redirectUrl);
+              return;
+            }
+            let data = '';
+            res.on('data', (chunk: Buffer) => data += chunk.toString());
+            res.on('end', () => resolve(data));
+            res.on('error', reject);
+          });
+          req.on('error', reject);
+          req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+          req.end();
+        }
+
+        doRequest(url);
       });
 
       const truncatedHtml = body.length > 5000 ? body.slice(0, 5000) + '\n\n... [truncated]' : body;
