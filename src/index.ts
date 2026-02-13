@@ -650,7 +650,9 @@ server.tool(
           });
 
           const page = await context.newPage();
-          await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          // Brief wait for key visual elements to render after DOM is ready
+          await page.waitForTimeout(2000);
 
           const title = await page.title();
           const finalUrl = page.url();

@@ -1,6 +1,6 @@
 {
   "name": "@probeops/mcp-server",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "MCP server for multi-region infrastructure diagnostics — SSL, DNS, ping, whois, traceroute, port check, latency, and geo-proxy browsing from 6 global regions",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
