@@ -7,17 +7,13 @@
 
 MCP server for running infrastructure diagnostics from 6 global regions. SSL checks, DNS lookups, ping, whois, port checks, traceroute, latency tests, and more — each executed simultaneously from US East, US West, EU Central, Canada, India, and Australia.
 
-Also includes geo-proxy browsing: load any URL through a real browser from a specific region and get page content + screenshots.
+**Works instantly — no API key required.** Run `npx @probeops/mcp-server` and get 11 diagnostic tools with 10 free calls per day. Add an API key to unlock all 21 tools, 6 regions, and higher limits.
 
 Works with **Claude Code**, **Codex**, **Cursor**, **Windsurf**, **Cline**, and any [Model Context Protocol](https://modelcontextprotocol.io) compatible client.
 
 ## Quick Start
 
-### 1. Get an API Key
-
-Sign up at [probeops.com](https://probeops.com) and create an API key from the dashboard. Free tier available.
-
-### 2. Add to Your MCP Client
+### Option 1: Try It Now (No API Key)
 
 **Claude Code:**
 ```bash
@@ -28,7 +24,31 @@ claude mcp add probeops -- npx -y @probeops/mcp-server
 ```bash
 codex mcp add probeops -- npx -y @probeops/mcp-server
 ```
-Or add to `~/.codex/config.toml`:
+
+**Cursor / Windsurf / Cline** (add to `.mcp.json` or your client's MCP config):
+```json
+{
+  "mcpServers": {
+    "probeops": {
+      "command": "npx",
+      "args": ["-y", "@probeops/mcp-server"]
+    }
+  }
+}
+```
+
+That's it. You get 11 tools with 10 calls per day and 2 probe regions — no signup, no configuration.
+
+### Option 2: Full Access (Free API Key)
+
+Sign up at [probeops.com](https://probeops.com) and create an API key from the dashboard. Then add it to your config:
+
+**Claude Code:**
+```bash
+claude mcp add probeops -e PROBEOPS_API_KEY=your-key -- npx -y @probeops/mcp-server
+```
+
+**Codex** (add to `~/.codex/config.toml`):
 ```toml
 [mcp_servers.probeops]
 command = "npx"
@@ -38,7 +58,7 @@ args = ["-y", "@probeops/mcp-server"]
 PROBEOPS_API_KEY = "your-api-key-here"
 ```
 
-**Cursor / Windsurf / Cline** (add to `.mcp.json` or your client's MCP config):
+**Cursor / Windsurf / Cline:**
 ```json
 {
   "mcpServers": {
@@ -53,9 +73,19 @@ PROBEOPS_API_KEY = "your-api-key-here"
 }
 ```
 
+## Demo Mode vs Full Access
+
+|  | **Demo Mode** (no key) | **Free Tier** (with key) | **Professional** |
+|--|----------------------|------------------------|-----------------|
+| Tools | 11 | 21 | 21 |
+| Calls per day | 10 | 100 | 5,000 |
+| Regions per call | 2 | 4 | 6 |
+| Geo-proxy browsing | — | 3 hours/day | 10 hours/day |
+| Setup time | 0 min | 2 min | 2 min |
+
 ## What You Get
 
-14 infrastructure diagnostic tools, each running from 6 regions simultaneously. Plus geo-proxy browsing and account management.
+21 infrastructure diagnostic tools, each running from up to 6 regions simultaneously. Plus geo-proxy browsing and account management.
 
 Every diagnostic tool call returns per-region results and a quota footer showing remaining usage.
 
@@ -220,7 +250,7 @@ Diagnostics: 95 of 100 remaining today (Free)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PROBEOPS_API_KEY` | Yes | - | Your ProbeOps API key ([get one free](https://probeops.com/dashboard/api-keys)) |
+| `PROBEOPS_API_KEY` | No | - | Your ProbeOps API key ([get one free](https://probeops.com/dashboard/api-keys)). Without it, runs in demo mode (11 tools, 10 calls/day) |
 | `PROBEOPS_BASE_URL` | No | `https://probeops.com` | API base URL (for staging or self-hosted instances) |
 
 ## Rate Limits

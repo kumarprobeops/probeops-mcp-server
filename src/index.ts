@@ -3,9 +3,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProbeOpsClient } from './api-client.js';
+import { homedir } from 'node:os';
+import { ProbeOpsClient, PublicClient } from './api-client.js';
 import { ProbeOpsError, GeoProxyResponse, ProxyRegionInfo, CachedQuota, V1RunResponse } from './types.js';
 
 const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')).version as string;
@@ -39,13 +40,89 @@ const REGION_CONFIG: Record<string, { timezone: string; locale: string; lat: num
   'ap-southeast': { timezone: 'Australia/Sydney', locale: 'en-AU', lat: -33.87, lng: 151.21, location: 'Sydney, Australia' },
 };
 
-if (!API_KEY) {
-  console.error('Error: PROBEOPS_API_KEY environment variable is required.');
-  console.error('Get your free API key at https://probeops.com/dashboard/api-keys');
-  process.exit(1);
+// ── Demo Mode ────────────────────────────────────────────────
+
+const DEMO_MODE = !API_KEY;
+const client = DEMO_MODE ? null : new ProbeOpsClient({ apiKey: API_KEY!, baseUrl: BASE_URL });
+const publicClient = DEMO_MODE ? new PublicClient(BASE_URL) : null;
+
+// Persistent daily usage cap for demo mode
+const DEMO_DIR = join(homedir(), '.probeops-mcp');
+const USAGE_FILE = join(DEMO_DIR, 'usage.json');
+const DEMO_DAILY_LIMIT = 10;
+
+interface DemoUsage {
+  date: string;
+  count: number;
 }
 
-const client = new ProbeOpsClient({ apiKey: API_KEY, baseUrl: BASE_URL });
+function getDemoUsage(): DemoUsage {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const data = JSON.parse(readFileSync(USAGE_FILE, 'utf-8')) as DemoUsage;
+    if (data.date === today) return data;
+  } catch {}
+  return { date: today, count: 0 };
+}
+
+function incrementDemoUsage(): DemoUsage {
+  const usage = getDemoUsage();
+  usage.count++;
+  try {
+    mkdirSync(DEMO_DIR, { recursive: true });
+    writeFileSync(USAGE_FILE, JSON.stringify(usage));
+  } catch {}
+  return usage;
+}
+
+function isDemoLimitReached(): boolean {
+  return getDemoUsage().count >= DEMO_DAILY_LIMIT;
+}
+
+function buildDemoFooter(): string {
+  const usage = getDemoUsage();
+  const remaining = Math.max(0, DEMO_DAILY_LIMIT - usage.count);
+  if (remaining > 0) {
+    return `\n---\nDemo Mode (${usage.count}/${DEMO_DAILY_LIMIT} daily calls used) | 2 of 6 regions\nGet all 21 tools + 6 regions: https://probeops.com/register?utm_source=mcp&utm_medium=demo_footer`;
+  }
+  return `\n---\nDaily demo limit reached (${DEMO_DAILY_LIMIT}/${DEMO_DAILY_LIMIT})\nGet your free API key: https://probeops.com/dashboard/api-keys?utm_source=mcp&utm_medium=demo_limit\nSetup: export PROBEOPS_API_KEY=your_key_here`;
+}
+
+function demoLimitMessage(): string {
+  return [
+    'Daily demo limit reached (10/10)',
+    '',
+    'Get your free API key for unlimited access:',
+    '  1. Sign up: https://probeops.com/register?utm_source=mcp&utm_medium=demo_limit',
+    '  2. Get key: https://probeops.com/dashboard/api-keys',
+    '  3. Set env: export PROBEOPS_API_KEY=your_key_here',
+    '',
+    'Or use the get_api_key tool for platform-specific setup instructions.',
+  ].join('\n');
+}
+
+function gatedToolMessage(toolName: string): string {
+  return [
+    `This tool requires a ProbeOps API key.`,
+    '',
+    `Tool: ${toolName}`,
+    `Status: AUTH_REQUIRED`,
+    '',
+    'Get your free API key:',
+    '  1. Sign up: https://probeops.com/register?utm_source=mcp&utm_medium=gated_tool',
+    '  2. Get key: https://probeops.com/dashboard/api-keys',
+    '  3. Set env: export PROBEOPS_API_KEY=your_key_here',
+    '',
+    'Or use the get_api_key tool for platform-specific setup instructions.',
+  ].join('\n');
+}
+
+if (DEMO_MODE) {
+  process.stderr.write('\n  ProbeOps MCP Server \u2014 Demo Mode\n');
+  process.stderr.write('  11 tools available | 2 regions per call | 10 calls/day\n');
+  process.stderr.write('  Unlock all 21 tools + 6 regions: https://probeops.com/register?utm_source=mcp&utm_medium=demo\n');
+  process.stderr.write('  Setup: export PROBEOPS_API_KEY=your_key_here\n\n');
+}
 
 // ── Token Cache (reuse tokens across geo_browse calls) ──────
 
@@ -104,7 +181,7 @@ async function getOrCreateProxyTokenImpl(region: string): Promise<GeoProxyRespon
     if (remaining > 0) {
       try {
         process.stderr.write(`[probeops] Token ${cachedProxyToken.data.token_id} nearing expiry (${Math.round(remaining / 60000)} min), extending (+1 quota)\n`);
-        const data = await client.extendProxyToken(cachedProxyToken.data.token_id);
+        const data = await client!.extendProxyToken(cachedProxyToken.data.token_id);
         cachedProxyToken = {
           data,
           expiresAt: new Date(data.expires_at).getTime(),
@@ -126,7 +203,7 @@ async function getOrCreateProxyTokenImpl(region: string): Promise<GeoProxyRespon
 
   // Tier 3: No cache, expired, or extend failed — generate new token
   process.stderr.write(`[probeops] Generating new proxy token (1 daily quota consumed)\n`);
-  const data = await client.getGeoProxy({ region });
+  const data = await client!.getGeoProxy({ region });
   cachedProxyToken = {
     data,
     expiresAt: new Date(data.expires_at).getTime(),
@@ -171,8 +248,8 @@ async function refreshQuotaCache(): Promise<CachedQuota> {
     return quotaCache;
   }
   const [diagResult, proxyResult] = await Promise.allSettled([
-    client.getQuota(),
-    client.getProxyDailyUsage(),
+    client!.getQuota(),
+    client!.getProxyDailyUsage(),
   ]);
   quotaCache = {
     diagnostic: diagResult.status === 'fulfilled' ? diagResult.value : quotaCache.diagnostic,
@@ -267,7 +344,13 @@ server.tool(
   { domain: z.string().describe('Domain name to check (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.sslCheck({ domain });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.sslCheck(domain);
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatSslCheck(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.sslCheck({ domain });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatSslCheck(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -285,7 +368,13 @@ server.tool(
   },
   async ({ domain, record_type }) => {
     try {
-      const data = await client.dnsLookup({ domain, record_type });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(domain, record_type);
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain, record_type });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -300,7 +389,13 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.dnsLookup({ domain, record_type: 'MX' });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(domain, 'MX');
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain, record_type: 'MX' });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -315,7 +410,13 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.dnsLookup({ domain, record_type: 'TXT' });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(domain, 'TXT');
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain, record_type: 'TXT' });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -330,7 +431,13 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.dnsLookup({ domain, record_type: 'NS' });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(domain, 'NS');
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain, record_type: 'NS' });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -345,7 +452,13 @@ server.tool(
   { domain: z.string().describe('Domain or subdomain to look up (e.g., "www.example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.dnsLookup({ domain, record_type: 'CNAME' });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(domain, 'CNAME');
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain, record_type: 'CNAME' });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -360,7 +473,13 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.dnsLookup({ domain, record_type: 'CAA' });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(domain, 'CAA');
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain, record_type: 'CAA' });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -375,7 +494,13 @@ server.tool(
   { ip: z.string().describe('IP address to look up (e.g., "8.8.8.8")') },
   async ({ ip }) => {
     try {
-      const data = await client.dnsLookup({ domain: ip, record_type: 'PTR' });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.dnsLookup(ip, 'PTR');
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatDnsLookup(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.dnsLookup({ domain: ip, record_type: 'PTR' });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatDnsLookup(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -390,7 +515,13 @@ server.tool(
   { url: z.string().describe('Full URL to check (e.g., "https://example.com")') },
   async ({ url }) => {
     try {
-      const data = await client.isItDown({ url });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.isItDown(url);
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatIsItDown(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.isItDown({ url });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatIsItDown(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -405,7 +536,13 @@ server.tool(
   { target: z.string().describe('Hostname or IP to test (e.g., "example.com" or "8.8.8.8")') },
   async ({ target }) => {
     try {
-      const data = await client.latencyTest({ target });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.latencyTest(target);
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatLatencyTest(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.latencyTest({ target });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatLatencyTest(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -423,7 +560,10 @@ server.tool(
   },
   async ({ target, protocol }) => {
     try {
-      const data = await client.traceroute({ target, protocol });
+      if (DEMO_MODE) {
+        return { content: [{ type: 'text', text: gatedToolMessage('traceroute') }] };
+      }
+      const data = await client!.traceroute({ target, protocol });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatTraceroute(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -441,7 +581,13 @@ server.tool(
   },
   async ({ target, port }) => {
     try {
-      const data = await client.portCheck({ target, port });
+      if (DEMO_MODE) {
+        if (isDemoLimitReached()) return { content: [{ type: 'text', text: demoLimitMessage() }] };
+        const data = await publicClient!.portCheck(target, port);
+        incrementDemoUsage();
+        return { content: [{ type: 'text', text: formatPortCheck(data) + buildDemoFooter() }] };
+      }
+      const data = await client!.portCheck({ target, port });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatPortCheck(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -458,7 +604,8 @@ server.tool(
   { target: z.string().describe('Hostname or IP to ping (e.g., "example.com" or "8.8.8.8")') },
   async ({ target }) => {
     try {
-      const data = await client.run('ping', target);
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('ping') }] };
+      const data = await client!.run('ping', target);
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -473,7 +620,8 @@ server.tool(
   { domain: z.string().describe('Domain name to look up (e.g., "example.com")') },
   async ({ domain }) => {
     try {
-      const data = await client.run('whois', domain);
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('whois') }] };
+      const data = await client!.run('whois', domain);
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -491,9 +639,10 @@ server.tool(
   },
   async ({ target, ports }) => {
     try {
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('nmap_port_check') }] };
       const params: Record<string, unknown> = {};
       if (ports) params.ports = ports;
-      const data = await client.run('nmap', target, params);
+      const data = await client!.run('nmap', target, params);
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -511,7 +660,8 @@ server.tool(
   },
   async ({ target, port }) => {
     try {
-      const data = await client.run('tcping', target, { port });
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('tcp_ping') }] };
+      const data = await client!.run('tcping', target, { port });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -529,7 +679,8 @@ server.tool(
   },
   async ({ url, keyword }) => {
     try {
-      const data = await client.run('keyword_check', url, { keyword });
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('keyword_check') }] };
+      const data = await client!.run('keyword_check', url, { keyword });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -544,7 +695,8 @@ server.tool(
   { url: z.string().describe('WebSocket URL to check (e.g., "wss://example.com/ws")') },
   async ({ url }) => {
     try {
-      const data = await client.run('websocket_check', url);
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('websocket_check') }] };
+      const data = await client!.run('websocket_check', url);
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -562,7 +714,8 @@ server.tool(
   },
   async ({ target, port }) => {
     try {
-      const data = await client.run('banner_grab', target, { port });
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('banner_grab') }] };
+      const data = await client!.run('banner_grab', target, { port });
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -577,7 +730,8 @@ server.tool(
   { url: z.string().describe('API URL to check (e.g., "https://api.example.com/health")') },
   async ({ url }) => {
     try {
-      const data = await client.run('api_health', url);
+      if (DEMO_MODE) return { content: [{ type: 'text', text: gatedToolMessage('api_health') }] };
+      const data = await client!.run('api_health', url);
       updateQuotaFromV1(data);
       return { content: [{ type: 'text', text: formatGenericResult(data) + buildQuotaFooter('diagnostic') }] };
     } catch (err) {
@@ -586,8 +740,77 @@ server.tool(
   }
 );
 
+// ── Get API Key Tool ─────────────────────────────────────────
+
+server.tool(
+  'get_api_key',
+  'Get instructions to set up your ProbeOps API key for full access to all 21 tools and 6 global regions.',
+  {},
+  async () => {
+    if (!DEMO_MODE) {
+      return { content: [{ type: 'text', text: 'API key is already configured. Use account_status to check your quota.' }] };
+    }
+    const usage = getDemoUsage();
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          'ProbeOps API Key Setup',
+          '======================',
+          '',
+          'Step 1: Create your free account',
+          '  https://probeops.com/register?utm_source=mcp&utm_medium=get_api_key',
+          '',
+          'Step 2: Generate an API key',
+          '  https://probeops.com/dashboard/api-keys?utm_source=mcp&utm_medium=get_api_key',
+          '',
+          'Step 3: Set the environment variable',
+          '',
+          '  macOS/Linux (add to ~/.bashrc or ~/.zshrc):',
+          '    export PROBEOPS_API_KEY=your_key_here',
+          '',
+          '  Windows (PowerShell):',
+          '    $env:PROBEOPS_API_KEY="your_key_here"',
+          '',
+          '  Windows (Command Prompt):',
+          '    set PROBEOPS_API_KEY=your_key_here',
+          '',
+          'Step 4: Configure your MCP client',
+          '',
+          '  Claude Desktop (~/.claude/claude_desktop_config.json):',
+          '    {',
+          '      "mcpServers": {',
+          '        "probeops": {',
+          '          "command": "npx",',
+          '          "args": ["-y", "@probeops/mcp-server"],',
+          '          "env": { "PROBEOPS_API_KEY": "your_key_here" }',
+          '        }',
+          '      }',
+          '    }',
+          '',
+          '  Cursor (.cursor/mcp.json):',
+          '    {',
+          '      "mcpServers": {',
+          '        "probeops": {',
+          '          "command": "npx",',
+          '          "args": ["-y", "@probeops/mcp-server"],',
+          '          "env": { "PROBEOPS_API_KEY": "your_key_here" }',
+          '        }',
+          '      }',
+          '    }',
+          '',
+          `Demo usage today: ${usage.count}/${DEMO_DAILY_LIMIT} calls`,
+          '',
+          'Free tier includes: 21 tools, 6 regions, 100 calls/day',
+        ].join('\n'),
+      }],
+    };
+  }
+);
+
 // ── Proxy Tools ─────────────────────────────────────────────
 
+if (!DEMO_MODE) {
 server.tool(
   'get_geo_proxy',
   'Get geo-proxy credentials for a specific region. Returns a proxy JWT token with tier-based quota info. The token can be used with Playwright or any HTTPS proxy client to browse the web from that geographic region. A single token works across all regions.',
@@ -826,6 +1049,7 @@ server.tool(
     }
   }
 );
+} // end if (!DEMO_MODE) — proxy tools
 
 server.tool(
   'account_status',
@@ -833,6 +1057,36 @@ server.tool(
   {},
   async () => {
     try {
+      if (DEMO_MODE) {
+        const usage = getDemoUsage();
+        const remaining = Math.max(0, DEMO_DAILY_LIMIT - usage.count);
+        const gatedTools = ['ping', 'whois', 'nmap_port_check', 'tcp_ping', 'traceroute', 'keyword_check', 'websocket_check', 'banner_grab', 'api_health'];
+        const proxyTools = ['get_geo_proxy', 'geo_browse'];
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              'ProbeOps MCP Server \u2014 Demo Mode',
+              '',
+              `  Mode: demo`,
+              `  Demo calls today: ${usage.count} of ${DEMO_DAILY_LIMIT}`,
+              `  Remaining: ${remaining}`,
+              `  Tools available: 11 (of 21)`,
+              `  Regions per call: 2 (of 6)`,
+              '',
+              '  Gated tools (require API key):',
+              `    ${gatedTools.join(', ')}`,
+              '',
+              '  Proxy tools (require API key):',
+              `    ${proxyTools.join(', ')}`,
+              '',
+              '  Get full access:',
+              '    https://probeops.com/register?utm_source=mcp&utm_medium=account_status',
+              '    Setup: export PROBEOPS_API_KEY=your_key_here',
+            ].join('\n'),
+          }],
+        };
+      }
       // Force-refresh cache (awaited)
       quotaCache.fetchedAt = 0;
       const q = await refreshQuotaCache();
@@ -858,7 +1112,11 @@ server.resource(
   { description: 'List of available probe regions with location and status' },
   async () => {
     try {
-      const data = await client.getRegions();
+      if (DEMO_MODE) {
+        const data = await publicClient!.getRegions();
+        return { contents: [{ uri: 'probeops://regions', text: formatRegions(data), mimeType: 'text/plain' }] };
+      }
+      const data = await client!.getRegions();
       return { contents: [{ uri: 'probeops://regions', text: formatRegions(data), mimeType: 'text/plain' }] };
     } catch (err) {
       return { contents: [{ uri: 'probeops://regions', text: errorText(err), mimeType: 'text/plain' }] };
@@ -871,6 +1129,9 @@ server.resource(
   'probeops://proxy-regions',
   { description: 'List of available geo-proxy regions with proxy URLs for Playwright/browser proxy usage' },
   async () => {
+    if (DEMO_MODE) {
+      return { contents: [{ uri: 'probeops://proxy-regions', text: 'Geo-proxy regions require an API key.\nGet your free key: https://probeops.com/register?utm_source=mcp&utm_medium=resource', mimeType: 'text/plain' }] };
+    }
     try {
       // Fetch a token to get live proxy_nodes map from API
       const data = await getOrCreateProxyToken('us-east');
@@ -900,6 +1161,21 @@ server.resource(
   'probeops://usage',
   { description: 'Current API usage and remaining quota for your ProbeOps account (diagnostic + proxy)' },
   async () => {
+    if (DEMO_MODE) {
+      const usage = getDemoUsage();
+      const remaining = Math.max(0, DEMO_DAILY_LIMIT - usage.count);
+      const text = [
+        'ProbeOps MCP Server \u2014 Demo Mode',
+        '',
+        `  Demo calls today: ${usage.count} of ${DEMO_DAILY_LIMIT}`,
+        `  Remaining: ${remaining}`,
+        `  Tools available: 11 (of 21)`,
+        `  Regions per call: 2 (of 6)`,
+        '',
+        '  Get full access: https://probeops.com/register?utm_source=mcp&utm_medium=resource',
+      ].join('\n');
+      return { contents: [{ uri: 'probeops://usage', text, mimeType: 'text/plain' }] };
+    }
     try {
       quotaCache.fetchedAt = 0;
       const q = await refreshQuotaCache();

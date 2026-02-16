@@ -23,12 +23,93 @@ import {
 
 const DEFAULT_BASE_URL = 'https://probeops.com';
 
+// ── Public Client (demo mode, no auth) ─────────────────────
+
+export class PublicClient {
+  private baseUrl: string;
+
+  constructor(baseUrl: string) {
+    this.baseUrl = (baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  }
+
+  private async post<T>(path: string, body: unknown): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'probeops-mcp-server/1.2.0 (demo)',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(45000),
+    });
+
+    if (!response.ok) {
+      let detail: string | undefined;
+      let retryAfter: number | undefined;
+      const retryHeader = response.headers.get('Retry-After');
+      if (retryHeader) retryAfter = parseInt(retryHeader, 10);
+
+      try {
+        const errorBody = await response.json() as { detail?: string | { error?: string; message?: string; retry_after?: number } };
+        if (typeof errorBody.detail === 'string') {
+          detail = errorBody.detail;
+        } else if (errorBody.detail && typeof errorBody.detail === 'object') {
+          detail = errorBody.detail.message || errorBody.detail.error;
+          if (errorBody.detail.retry_after) retryAfter = errorBody.detail.retry_after;
+        }
+      } catch {}
+
+      throw new ProbeOpsError(
+        `API request failed: ${response.status} ${response.statusText}`,
+        response.status,
+        detail,
+        retryAfter
+      );
+    }
+
+    return response.json() as Promise<T>;
+  }
+
+  async getRegions(): Promise<RegionsResponse> {
+    const url = `${this.baseUrl}/api/tools/regions`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'probeops-mcp-server/1.2.0 (demo)' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) {
+      throw new ProbeOpsError(`Failed to fetch regions: ${response.status}`, response.status);
+    }
+    return response.json() as Promise<RegionsResponse>;
+  }
+
+  async sslCheck(domain: string): Promise<SslCheckResponse> {
+    return this.post('/api/tools/ssl-check', { domain });
+  }
+
+  async dnsLookup(domain: string, record_type?: string): Promise<DnsLookupResponse> {
+    return this.post('/api/tools/dns-lookup', { domain, record_type: record_type || 'A' });
+  }
+
+  async isItDown(url: string): Promise<IsItDownResponse> {
+    return this.post('/api/tools/is-it-down', { url });
+  }
+
+  async latencyTest(target: string): Promise<LatencyTestResponse> {
+    return this.post('/api/tools/latency-test', { target });
+  }
+
+  async portCheck(target: string, port: number): Promise<PortCheckResponse> {
+    return this.post('/api/tools/port-check', { target, port });
+  }
+}
+
 export class ProbeOpsClient {
   private apiKey: string;
   private baseUrl: string;
 
   constructor(config: ProbeOpsConfig) {
-    this.apiKey = config.apiKey;
+    this.apiKey = config.apiKey!;
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
   }
 

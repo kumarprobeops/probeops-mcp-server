@@ -296,7 +296,7 @@ export interface CachedQuota {
 // ── API Client Config ─────────────────────────────────────────
 
 export interface ProbeOpsConfig {
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
 }
 
