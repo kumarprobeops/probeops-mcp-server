@@ -6,3 +6,6 @@ test-*.mjs
 *.tgz
 .env
 .DS_Store
+.npmrc
+.mcpregistry_*
+server.json

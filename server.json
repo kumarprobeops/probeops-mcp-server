@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.kumarprobeops/probeops-mcp-server",
+  "description": "Network diagnostics from 6 global regions. SSL, DNS, ping, whois, traceroute, port scan, latency.",
+  "repository": {
+    "url": "https://github.com/kumarprobeops/probeops-mcp-server",
+    "source": "github"
+  },
+  "websiteUrl": "https://probeops.com",
+  "version": "1.2.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@probeops/mcp-server",
+      "version": "1.2.3",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PROBEOPS_API_KEY",
+          "description": "ProbeOps API key (optional, runs in demo mode without it)",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
