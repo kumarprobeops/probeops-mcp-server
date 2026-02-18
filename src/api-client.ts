@@ -27,9 +27,11 @@ const DEFAULT_BASE_URL = 'https://probeops.com';
 
 export class PublicClient {
   private baseUrl: string;
+  private version: string;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, version: string) {
     this.baseUrl = (baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    this.version = version;
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
@@ -38,7 +40,7 @@ export class PublicClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'probeops-mcp-server/1.2.0 (demo)',
+        'User-Agent': `probeops-mcp-server/${this.version} (demo)`,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(45000),
@@ -74,7 +76,7 @@ export class PublicClient {
   async getRegions(): Promise<RegionsResponse> {
     const url = `${this.baseUrl}/api/tools/regions`;
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'probeops-mcp-server/1.2.0 (demo)' },
+      headers: { 'User-Agent': `probeops-mcp-server/${this.version} (demo)` },
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) {
@@ -107,10 +109,12 @@ export class PublicClient {
 export class ProbeOpsClient {
   private apiKey: string;
   private baseUrl: string;
+  private version: string;
 
-  constructor(config: ProbeOpsConfig) {
+  constructor(config: ProbeOpsConfig, version: string) {
     this.apiKey = config.apiKey!;
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    this.version = version;
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -118,7 +122,7 @@ export class ProbeOpsClient {
     const headers: Record<string, string> = {
       'X-API-Key': this.apiKey,
       'Content-Type': 'application/json',
-      'User-Agent': 'probeops-mcp-server/1.0.0',
+      'User-Agent': `probeops-mcp-server/${this.version}`,
     };
 
     const response = await fetch(url, {

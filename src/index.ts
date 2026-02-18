@@ -43,8 +43,8 @@ const REGION_CONFIG: Record<string, { timezone: string; locale: string; lat: num
 // ── Demo Mode ────────────────────────────────────────────────
 
 const DEMO_MODE = !API_KEY;
-const client = DEMO_MODE ? null : new ProbeOpsClient({ apiKey: API_KEY!, baseUrl: BASE_URL });
-const publicClient = DEMO_MODE ? new PublicClient(BASE_URL) : null;
+const client = DEMO_MODE ? null : new ProbeOpsClient({ apiKey: API_KEY!, baseUrl: BASE_URL }, PKG_VERSION);
+const publicClient = DEMO_MODE ? new PublicClient(BASE_URL, PKG_VERSION) : null;
 
 // Persistent daily usage cap for demo mode
 const DEMO_DIR = join(homedir(), '.probeops-mcp');
@@ -117,12 +117,7 @@ function gatedToolMessage(toolName: string): string {
   ].join('\n');
 }
 
-if (DEMO_MODE) {
-  process.stderr.write('\n  ProbeOps MCP Server \u2014 Demo Mode\n');
-  process.stderr.write('  11 tools available | 2 regions per call | 10 calls/day\n');
-  process.stderr.write('  Unlock all 21 tools + 6 regions: https://probeops.com/register?utm_source=mcp&utm_medium=demo\n');
-  process.stderr.write('  Setup: export PROBEOPS_API_KEY=your_key_here\n\n');
-}
+// Demo banner is printed in main() only when entering MCP server mode
 
 // ── Token Cache (reuse tokens across geo_browse calls) ──────
 
@@ -1193,9 +1188,143 @@ server.resource(
   }
 );
 
+// ── Interactive CLI (TTY mode) ──────────────────────────────
+
+function printVersion(): void {
+  console.log(PKG_VERSION);
+}
+
+function printHelp(): void {
+  console.log(`
+  ProbeOps MCP Server v${PKG_VERSION}
+  Network diagnostics from 6 global regions via MCP
+
+  Usage:
+    npx @probeops/mcp-server          Run interactively (terminal) or as MCP server (piped)
+    npx @probeops/mcp-server --help    Show this help message
+    npx @probeops/mcp-server --version Show version
+    npx @probeops/mcp-server --demo    Force interactive demo mode
+
+  Quick Setup:
+
+    Claude Code:
+      claude mcp add probeops -- npx -y @probeops/mcp-server
+
+    Cursor / Windsurf (settings.json):
+      {
+        "mcpServers": {
+          "probeops": {
+            "command": "npx",
+            "args": ["-y", "@probeops/mcp-server"]
+          }
+        }
+      }
+
+  Environment:
+    PROBEOPS_API_KEY    Your API key (optional, enables all 21 tools + 6 regions)
+    PROBEOPS_BASE_URL   API base URL (default: https://probeops.com)
+
+  Free: 11 tools, 2 regions, 10 calls/day (no signup needed)
+  Full: 21 tools, 6 regions — https://probeops.com/register
+`);
+}
+
+async function runInteractiveDemo(): Promise<void> {
+  const W = 55;
+  const top    = '\u2554' + '\u2550'.repeat(W) + '\u2557';
+  const bottom = '\u255a' + '\u2550'.repeat(W) + '\u255d';
+  const pad = (s: string) => '\u2551  ' + s + ' '.repeat(Math.max(0, W - 2 - s.length)) + '\u2551';
+
+  console.log('');
+  console.log(`  ${top}`);
+  console.log(`  ${pad(`ProbeOps MCP Server v${PKG_VERSION}`)}`);
+  console.log(`  ${pad('Network diagnostics from 6 global regions')}`);
+  console.log(`  ${bottom}`);
+  console.log('');
+  console.log('  Running live demo: SSL certificate check on github.com...');
+  console.log('');
+
+  // Run SSL check via public API (no auth needed)
+  const demoClient = new PublicClient(BASE_URL, PKG_VERSION);
+  try {
+    const result = await demoClient.sslCheck('github.com');
+
+    // Extract key info from result
+    const cert = result.certificate;
+    if (cert) {
+      const daysLeft = cert.days_until_expiry;
+      const issuer = cert.issuer?.organization || cert.issuer?.common_name || 'Unknown';
+      const regions = result.regions_checked
+        .map((r) => r.region).join(', ');
+
+      console.log(`  \u2713 github.com \u2014 Valid (expires in ${daysLeft} days)`);
+      console.log(`    Issuer: ${issuer}`);
+      console.log(`    Regions checked: ${regions}`);
+    } else {
+      console.log('  \u2713 SSL check completed for github.com');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`  \u2717 Demo failed: ${msg}`);
+    console.log('    (The server still works — configure it in your MCP client below)');
+  }
+
+  const divider = '\u2500'.repeat(W + 2);
+  console.log('');
+  console.log(`  ${divider}`);
+  console.log('  This server provides 21 network diagnostic tools to');
+  console.log('  AI assistants via the Model Context Protocol (MCP).');
+  console.log('');
+  console.log('  Quick Setup:');
+  console.log('');
+  console.log('  Claude Code:');
+  console.log('    claude mcp add probeops -- npx -y @probeops/mcp-server');
+  console.log('');
+  console.log('  Cursor / Windsurf (settings.json):');
+  console.log('    {');
+  console.log('      "mcpServers": {');
+  console.log('        "probeops": {');
+  console.log('          "command": "npx",');
+  console.log('          "args": ["-y", "@probeops/mcp-server"]');
+  console.log('        }');
+  console.log('      }');
+  console.log('    }');
+  console.log('');
+  console.log(`  ${divider}`);
+  console.log('  Free: 11 tools, 2 regions, 10 calls/day (no signup)');
+  console.log('  Full: 21 tools, 6 regions \u2014 https://probeops.com/register');
+  console.log('');
+}
+
 // ── Start Server ────────────────────────────────────────────
 
 async function main() {
+  const args = process.argv.slice(2);
+
+  // CLI flags
+  if (args.includes('--version') || args.includes('-v')) {
+    printVersion();
+    process.exit(0);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    printHelp();
+    process.exit(0);
+  }
+
+  // Interactive mode: when run directly in a terminal (TTY) or with --demo flag
+  if (process.stdin.isTTY || args.includes('--demo')) {
+    await runInteractiveDemo();
+    process.exit(0);
+  }
+
+  // MCP mode: stdin is piped from an MCP client
+  if (DEMO_MODE) {
+    process.stderr.write('\n  ProbeOps MCP Server \u2014 Demo Mode\n');
+    process.stderr.write('  11 tools available | 2 regions per call | 10 calls/day\n');
+    process.stderr.write('  Unlock all 21 tools + 6 regions: https://probeops.com/register?utm_source=mcp&utm_medium=demo\n');
+    process.stderr.write('  Setup: export PROBEOPS_API_KEY=your_key_here\n\n');
+  }
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
